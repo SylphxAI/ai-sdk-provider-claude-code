@@ -1,8 +1,8 @@
-# @sylpx/ai-sdk-provider-claude-code
+# @sylphx/ai-sdk-provider-claude-code
 
 Claude Code provider for [Vercel AI SDK](https://sdk.vercel.ai/docs) with **universal tool support** - works with ANY standard Vercel AI SDK tool without MCP servers.
 
-[![npm version](https://badge.fury.io/js/@sylpx%2Fai-sdk-provider-claude-code.svg)](https://www.npmjs.com/package/@sylpx/ai-sdk-provider-claude-code)
+[![npm version](https://badge.fury.io/js/@sylphx%2Fai-sdk-provider-claude-code.svg)](https://www.npmjs.com/package/@sylphx/ai-sdk-provider-claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## ✨ Key Features
@@ -16,7 +16,7 @@ Claude Code provider for [Vercel AI SDK](https://sdk.vercel.ai/docs) with **univ
 
 ## 🆚 Why This Provider?
 
-| Feature | @sylpx/ai-sdk-provider-claude-code | Other Providers |
+| Feature | @sylphx/ai-sdk-provider-claude-code | Other Providers |
 |---------|-----------------------------------|-----------------|
 | **Tool Support** | ✅ ANY Vercel AI SDK tool | ❌ MCP servers only |
 | **Setup Complexity** | ✅ Zero config | ⚠️ Requires MCP setup |
@@ -29,7 +29,7 @@ Claude Code provider for [Vercel AI SDK](https://sdk.vercel.ai/docs) with **univ
 ## 📦 Installation
 
 ```bash
-npm install @sylpx/ai-sdk-provider-claude-code ai
+npm install @sylphx/ai-sdk-provider-claude-code ai
 ```
 
 ## 🔑 Prerequisites
@@ -51,7 +51,7 @@ npm install @sylpx/ai-sdk-provider-claude-code ai
 
 ```typescript
 import { generateText } from 'ai';
-import { claudeCode } from '@sylpx/ai-sdk-provider-claude-code';
+import { claudeCode } from '@sylphx/ai-sdk-provider-claude-code';
 
 const { text } = await generateText({
   model: claudeCode('sonnet'),
@@ -65,7 +65,7 @@ console.log(text);
 
 ```typescript
 import { streamText } from 'ai';
-import { claudeCode } from '@sylpx/ai-sdk-provider-claude-code';
+import { claudeCode } from '@sylphx/ai-sdk-provider-claude-code';
 
 const { textStream } = await streamText({
   model: claudeCode('sonnet'),
@@ -81,7 +81,7 @@ for await (const chunk of textStream) {
 
 ```typescript
 import { generateText } from 'ai';
-import { claudeCode } from '@sylpx/ai-sdk-provider-claude-code';
+import { claudeCode } from '@sylphx/ai-sdk-provider-claude-code';
 import { z } from 'zod';
 
 const { text, toolCalls } = await generateText({
@@ -115,7 +115,7 @@ console.log('Response:', text);
 
 ```typescript
 import { generateText } from 'ai';
-import { claudeCode } from '@sylpx/ai-sdk-provider-claude-code';
+import { claudeCode } from '@sylphx/ai-sdk-provider-claude-code';
 
 const { text, reasoning } = await generateText({
   model: claudeCode('opus', {
@@ -132,7 +132,7 @@ console.log('Answer:', text);
 
 ```typescript
 import { streamText } from 'ai';
-import { claudeCode } from '@sylpx/ai-sdk-provider-claude-code';
+import { claudeCode } from '@sylphx/ai-sdk-provider-claude-code';
 import { z } from 'zod';
 
 const { textStream, toolCallStreams } = await streamText({
@@ -177,7 +177,7 @@ claudeCode('haiku')  // Claude 4.5 Haiku - Fastest, most cost-effective
 
 ```typescript
 import { generateText } from 'ai';
-import { claudeCode } from '@sylpx/ai-sdk-provider-claude-code';
+import { claudeCode } from '@sylphx/ai-sdk-provider-claude-code';
 
 const { text } = await generateText({
   model: claudeCode('sonnet'),
@@ -194,7 +194,7 @@ const { text } = await generateText({
 
 ```typescript
 import { generateText } from 'ai';
-import { claudeCode } from '@sylpx/ai-sdk-provider-claude-code';
+import { claudeCode } from '@sylphx/ai-sdk-provider-claude-code';
 
 const { text } = await generateText({
   model: claudeCode('sonnet'),
@@ -215,7 +215,7 @@ const { text } = await generateText({
 
 ```typescript
 import { generateText } from 'ai';
-import { claudeCode } from '@sylpx/ai-sdk-provider-claude-code';
+import { claudeCode } from '@sylphx/ai-sdk-provider-claude-code';
 
 const conversation = [
   { role: 'user', content: 'Hello!' },

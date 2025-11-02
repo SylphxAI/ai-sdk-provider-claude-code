@@ -7,7 +7,7 @@
  * @example
  * ```typescript
  * import { generateText } from 'ai';
- * import { claudeCode } from '@sylpx/ai-sdk-provider-claude-code';
+ * import { claudeCode } from '@sylphx/ai-sdk-provider-claude-code';
  *
  * const { text } = await generateText({
  *   model: claudeCode('sonnet'),
@@ -67,7 +67,7 @@ export function claudeCode(
  *
  * @example
  * ```typescript
- * import { provider } from '@sylpx/ai-sdk-provider-claude-code';
+ * import { provider } from '@sylphx/ai-sdk-provider-claude-code';
  *
  * const model = provider('sonnet');
  * ```

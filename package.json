@@ -1,5 +1,5 @@
 {
-  "name": "@sylpx/ai-sdk-provider-claude-code",
+  "name": "@sylphx/ai-sdk-provider-claude-code",
   "version": "1.0.0",
   "description": "Claude Code provider for Vercel AI SDK with universal tool support",
   "main": "./dist/index.js",

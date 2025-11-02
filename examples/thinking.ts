@@ -3,7 +3,7 @@
  */
 
 import { generateText } from 'ai';
-import { claudeCode } from '@sylpx/ai-sdk-provider-claude-code';
+import { claudeCode } from '@sylphx/ai-sdk-provider-claude-code';
 
 async function main() {
   const { text, reasoning } = await generateText({
