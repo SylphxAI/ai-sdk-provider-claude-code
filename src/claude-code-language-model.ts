@@ -1,0 +1,621 @@
+/**
+ * Claude Code Language Model
+ * Custom LanguageModelV2 implementation using Claude Agent SDK
+ * Supports Vercel AI SDK tools (executed by Vercel framework via MCP delegation)
+ */
+
+import type {
+  LanguageModelV2,
+  LanguageModelV2CallOptions,
+  LanguageModelV2FinishReason,
+  LanguageModelV2StreamPart,
+} from '@ai-sdk/provider';
+import { type Options, query } from '@anthropic-ai/claude-agent-sdk';
+import {
+  generateToolsSystemPrompt,
+  parseContentBlocks,
+  formatToolResult,
+  type ToolDefinition,
+} from './text-based-tools.js';
+import { StreamingXMLParser } from './streaming-xml-parser.js';
+
+// All Claude Code built-in tools to disable
+const CLAUDE_CODE_BUILTIN_TOOLS = [
+  'Task',
+  'Bash',
+  'Glob',
+  'Grep',
+  'ExitPlanMode',
+  'Read',
+  'Edit',
+  'Write',
+  'NotebookEdit',
+  'WebFetch',
+  'TodoWrite',
+  'WebSearch',
+  'BashOutput',
+  'KillShell',
+  'Skill',
+  'SlashCommand',
+];
+
+export interface ClaudeCodeLanguageModelConfig {
+  modelId: string;
+}
+
+export class ClaudeCodeLanguageModel implements LanguageModelV2 {
+  readonly specificationVersion = 'v2' as const;
+  readonly provider = 'claude-code' as const;
+  readonly modelId: string;
+
+  constructor(config: ClaudeCodeLanguageModelConfig) {
+    this.modelId = config.modelId;
+  }
+
+  get supportedUrls(): Record<string, RegExp[]> {
+    // Claude supports various image formats
+    return {
+      'image/*': [/.*/],
+    };
+  }
+
+  /**
+   * Convert tools from Vercel AI SDK format to our internal format
+   */
+  private convertTools(tools: unknown[]): Record<string, ToolDefinition> | undefined {
+    if (!tools || tools.length === 0) {
+      return undefined;
+    }
+
+    const toolsMap: Record<string, ToolDefinition> = {};
+    for (const tool of tools) {
+      if (typeof tool !== 'object' || !tool || !('name' in tool)) continue;
+
+      // Vercel AI SDK uses 'inputSchema' field for the JSON Schema
+      const parameters =
+        ('inputSchema' in tool && tool.inputSchema) ||
+        ('parameters' in tool && tool.parameters) ||
+        { type: 'object', properties: {} };
+
+      toolsMap[String(tool.name)] = {
+        type: 'function',
+        name: String(tool.name),
+        description: 'description' in tool ? String(tool.description) : undefined,
+        parameters: parameters as ToolDefinition['parameters'],
+      };
+    }
+    return toolsMap;
+  }
+
+  /**
+   * Convert Vercel AI SDK messages to a single string prompt
+   * Handles tool results by converting them to XML format
+   */
+  private convertMessagesToString(options: LanguageModelV2CallOptions): string {
+    const promptParts: string[] = [];
+
+    for (const message of options.prompt) {
+      if (message.role === 'user') {
+        // Handle both array and non-array content
+        const content = Array.isArray(message.content) ? message.content : [message.content];
+        const textParts = content
+          .filter((part) => typeof part === 'object' && part.type === 'text')
+          .map((part) => part.text);
+
+        if (textParts.length > 0) {
+          promptParts.push(textParts.join('\n'));
+        }
+      } else if (message.role === 'assistant') {
+        // Handle both array and non-array content
+        const content = Array.isArray(message.content) ? message.content : [message.content];
+        const textParts = content
+          .filter((part) => typeof part === 'object' && part.type === 'text')
+          .map((part) => part.text);
+
+        if (textParts.length > 0) {
+          // Prefix assistant messages for context
+          promptParts.push(`Previous assistant response: ${textParts.join('\n')}`);
+        }
+      } else if (message.role === 'tool') {
+        // Convert tool results to XML format for Claude
+        const content = Array.isArray(message.content) ? message.content : [message.content];
+        const toolResults: string[] = [];
+
+        for (const part of content) {
+          if (typeof part === 'object' && 'toolCallId' in part && 'output' in part) {
+            // Check if it's an error
+            const isError =
+              part.output &&
+              typeof part.output === 'object' &&
+              'type' in part.output &&
+              (part.output.type === 'error-text' || part.output.type === 'error-json');
+
+            let resultValue: unknown;
+            if (part.output && typeof part.output === 'object' && 'value' in part.output) {
+              resultValue = part.output.value;
+            } else {
+              resultValue = part.output;
+            }
+
+            toolResults.push(formatToolResult(part.toolCallId, resultValue, isError));
+          }
+        }
+
+        if (toolResults.length > 0) {
+          promptParts.push(toolResults.join('\n\n'));
+        }
+      }
+    }
+
+    return promptParts.join('\n\n');
+  }
+
+  /**
+   * Extract system prompt from messages
+   */
+  private extractSystemPrompt(options: LanguageModelV2CallOptions): string | undefined {
+    const systemMessages = options.prompt.filter((msg) => msg.role === 'system');
+    if (systemMessages.length === 0) {
+      return undefined;
+    }
+
+    const systemTexts = systemMessages
+      .flatMap((msg) => {
+        // Handle both array and non-array content
+        const content = Array.isArray(msg.content) ? msg.content : [msg.content];
+        return content
+          .filter((part) => typeof part === 'object' && part.type === 'text')
+          .map((part) => part.text);
+      })
+      .join('\n');
+
+    return systemTexts || undefined;
+  }
+
+  /**
+   * Build query options from call options
+   */
+  private buildQueryOptions(
+    options: LanguageModelV2CallOptions,
+    tools: Record<string, ToolDefinition> | undefined,
+    includePartialMessages = false
+  ): { queryOptions: Options; systemPrompt: string } {
+    // Build system prompt
+    let systemPrompt = this.extractSystemPrompt(options) || '';
+
+    // Add tools description to system prompt if tools are provided
+    if (tools && Object.keys(tools).length > 0) {
+      const toolsPrompt = generateToolsSystemPrompt(tools);
+      systemPrompt = systemPrompt ? `${systemPrompt}\n\n${toolsPrompt}` : toolsPrompt;
+    }
+
+    // Build query options
+    const queryOptions: Options = {
+      model: this.modelId,
+      settingSources: [],
+      disallowedTools: CLAUDE_CODE_BUILTIN_TOOLS,
+    };
+
+    if (systemPrompt) {
+      queryOptions.systemPrompt = systemPrompt;
+    }
+
+    if (includePartialMessages) {
+      queryOptions.includePartialMessages = true;
+    }
+
+    // Add maxThinkingTokens from providerOptions if provided
+    const providerOptions = options.providerOptions?.['claude-code'] as
+      | Record<string, unknown>
+      | undefined;
+    if (
+      providerOptions &&
+      'maxThinkingTokens' in providerOptions &&
+      typeof providerOptions.maxThinkingTokens === 'number'
+    ) {
+      queryOptions.maxThinkingTokens = providerOptions.maxThinkingTokens;
+    }
+
+    return { queryOptions, systemPrompt };
+  }
+
+  /**
+   * Extract usage tokens from result event
+   */
+  private extractUsage(event: unknown): { inputTokens: number; outputTokens: number } {
+    if (
+      !event ||
+      typeof event !== 'object' ||
+      !('usage' in event) ||
+      !event.usage ||
+      typeof event.usage !== 'object'
+    ) {
+      return { inputTokens: 0, outputTokens: 0 };
+    }
+
+    const usage = event.usage as Record<string, unknown>;
+    const inputTokens =
+      (typeof usage.input_tokens === 'number' ? usage.input_tokens : 0) +
+      (typeof usage.cache_creation_input_tokens === 'number'
+        ? usage.cache_creation_input_tokens
+        : 0) +
+      (typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0);
+    const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
+
+    return { inputTokens, outputTokens };
+  }
+
+  /**
+   * Check and handle result errors
+   */
+  private handleResultError(event: unknown): void {
+    if (!event || typeof event !== 'object' || !('subtype' in event)) {
+      return;
+    }
+
+    if (event.subtype === 'error_max_turns') {
+      throw new Error('Claude Code reached maximum turns limit');
+    } else if (event.subtype === 'error_during_execution') {
+      throw new Error('Error occurred during Claude Code execution');
+    }
+  }
+
+  async doGenerate(
+    options: LanguageModelV2CallOptions
+  ): Promise<Awaited<ReturnType<LanguageModelV2['doGenerate']>>> {
+    try {
+      // Convert tools and build query options
+      const tools = this.convertTools(options.tools || []);
+      const promptString = this.convertMessagesToString(options);
+      const { queryOptions } = this.buildQueryOptions(options, tools);
+
+      // Execute query
+      const queryResult = query({
+        prompt: promptString,
+        options: queryOptions,
+      });
+
+      // Collect results
+      const contentParts: any[] = [];
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let finishReason: LanguageModelV2FinishReason = 'stop';
+
+      for await (const event of queryResult) {
+        if (event.type === 'assistant') {
+          // Extract content from assistant message
+          const content = event.message.content;
+          for (const block of content) {
+            if (block.type === 'thinking') {
+              // Handle thinking/reasoning blocks
+              contentParts.push({
+                type: 'reasoning',
+                reasoning: block.thinking,
+              });
+            } else if (block.type === 'text') {
+              // Parse text for tool calls if tools are available
+              if (tools && Object.keys(tools).length > 0) {
+                const parsedBlocks = parseContentBlocks(block.text);
+                for (const parsedBlock of parsedBlocks) {
+                  if (parsedBlock.type === 'text') {
+                    contentParts.push({
+                      type: 'text',
+                      text: parsedBlock.text,
+                    });
+                  } else if (parsedBlock.type === 'tool_use') {
+                    contentParts.push({
+                      type: 'tool-call',
+                      toolCallId: parsedBlock.toolCallId,
+                      toolName: parsedBlock.toolName,
+                      input: JSON.stringify(parsedBlock.arguments),
+                    });
+                    finishReason = 'tool-calls';
+                  }
+                }
+              } else {
+                // No tools, just add text
+                contentParts.push({
+                  type: 'text',
+                  text: block.text,
+                });
+              }
+            }
+          }
+
+          // Check stop reason
+          if (event.message.stop_reason === 'end_turn') {
+            // Keep tool-calls finish reason if we detected tool calls
+            if (finishReason !== 'tool-calls') {
+              finishReason = 'stop';
+            }
+          } else if (event.message.stop_reason === 'max_tokens') {
+            finishReason = 'length';
+          }
+        } else if (event.type === 'result') {
+          this.handleResultError(event);
+          const usage = this.extractUsage(event);
+          inputTokens = usage.inputTokens;
+          outputTokens = usage.outputTokens;
+        }
+      }
+
+      return {
+        content: contentParts,
+        finishReason,
+        usage: {
+          inputTokens: inputTokens,
+          outputTokens: outputTokens,
+          totalTokens: inputTokens + outputTokens,
+        },
+        warnings: [],
+        response: { headers: {} },
+      };
+    } catch (error) {
+      // Log detailed error information
+      console.error('Claude Code error details:', {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        modelId: this.modelId,
+      });
+      throw new Error(
+        `Claude Code execution failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  async doStream(
+    options: LanguageModelV2CallOptions
+  ): Promise<Awaited<ReturnType<LanguageModelV2['doStream']>>> {
+    try {
+      // Convert tools and build query options
+      const tools = this.convertTools(options.tools || []);
+      const promptString = this.convertMessagesToString(options);
+      const { queryOptions } = this.buildQueryOptions(options, tools, true);
+
+      // Execute query
+      const queryResult = query({
+        prompt: promptString,
+        options: queryOptions,
+      });
+
+      // Bind helper methods to preserve `this` context
+      const handleResultError = this.handleResultError.bind(this);
+      const extractUsage = this.extractUsage.bind(this);
+
+      // Create streaming response
+      const stream = new ReadableStream<LanguageModelV2StreamPart>({
+        async start(controller) {
+          try {
+            let inputTokens = 0;
+            let outputTokens = 0;
+            let finishReason: LanguageModelV2FinishReason = 'stop';
+            let hasStartedText = false;
+            let hasEmittedTextEnd = false;
+            // Track thinking block indices for streaming
+            const thinkingBlockIndices = new Set<number>();
+            // XML parser for streaming tool call detection
+            const xmlParser = tools && Object.keys(tools).length > 0 ? new StreamingXMLParser() : null;
+
+            for await (const event of queryResult) {
+              // Handle streaming events from Anthropic SDK
+              if (event.type === 'stream_event') {
+                const streamEvent = event.event;
+
+                // Handle content block start (thinking or text)
+                if (streamEvent.type === 'content_block_start') {
+                  if (streamEvent.content_block.type === 'thinking') {
+                    // Start of thinking block - emit reasoning-start
+                    thinkingBlockIndices.add(streamEvent.index);
+                    controller.enqueue({
+                      type: 'reasoning-start',
+                      id: `reasoning-${streamEvent.index}`,
+                    });
+                  }
+                }
+                // Handle content block deltas
+                else if (streamEvent.type === 'content_block_delta') {
+                  if (streamEvent.delta.type === 'thinking_delta') {
+                    // Thinking delta - emit reasoning-delta
+                    controller.enqueue({
+                      type: 'reasoning-delta',
+                      id: `reasoning-${streamEvent.index}`,
+                      delta: streamEvent.delta.thinking,
+                    });
+                  } else if (streamEvent.delta.type === 'text_delta') {
+                    // Text delta - parse through XML parser if tools available
+                    if (xmlParser) {
+                      // All text should be wrapped in <text> tags per system prompt
+                      for (const xmlEvent of xmlParser.processChunk(streamEvent.delta.text)) {
+                        if (xmlEvent.type === 'text-start') {
+                          if (!hasStartedText) {
+                            controller.enqueue({
+                              type: 'text-start',
+                              id: 'text-0',
+                            });
+                            hasStartedText = true;
+                          }
+                        } else if (xmlEvent.type === 'text-delta') {
+                          controller.enqueue({
+                            type: 'text-delta',
+                            id: 'text-0',
+                            delta: xmlEvent.delta,
+                          });
+                        } else if (xmlEvent.type === 'tool-input-start') {
+                          controller.enqueue({
+                            type: 'tool-input-start',
+                            id: xmlEvent.toolCallId,
+                            toolName: xmlEvent.toolName,
+                          });
+                        } else if (xmlEvent.type === 'tool-input-delta') {
+                          controller.enqueue({
+                            type: 'tool-input-delta',
+                            id: xmlEvent.toolCallId,
+                            delta: xmlEvent.delta,
+                          });
+                        } else if (xmlEvent.type === 'tool-input-end') {
+                          controller.enqueue({
+                            type: 'tool-input-end',
+                            id: xmlEvent.toolCallId,
+                          });
+                        } else if (xmlEvent.type === 'tool-call-complete') {
+                          controller.enqueue({
+                            type: 'tool-call',
+                            toolCallId: xmlEvent.toolCallId,
+                            toolName: xmlEvent.toolName,
+                            input: JSON.stringify(xmlEvent.arguments),
+                          });
+                          finishReason = 'tool-calls';
+                        }
+                      }
+                    } else {
+                      // No tools - emit text directly
+                      if (!hasStartedText) {
+                        controller.enqueue({
+                          type: 'text-start',
+                          id: 'text-0',
+                        });
+                        hasStartedText = true;
+                      }
+                      controller.enqueue({
+                        type: 'text-delta',
+                        id: 'text-0',
+                        delta: streamEvent.delta.text,
+                      });
+                    }
+                  }
+                }
+                // Handle content block stop
+                else if (streamEvent.type === 'content_block_stop') {
+                  if (thinkingBlockIndices.has(streamEvent.index)) {
+                    // End of thinking block - emit reasoning-end
+                    controller.enqueue({
+                      type: 'reasoning-end',
+                      id: `reasoning-${streamEvent.index}`,
+                    });
+                    thinkingBlockIndices.delete(streamEvent.index);
+                  } else if (hasStartedText) {
+                    // End of text block - flush XML parser if tools are available
+                    if (xmlParser) {
+                      for (const xmlEvent of xmlParser.flush()) {
+                        if (xmlEvent.type === 'text-delta') {
+                          controller.enqueue({
+                            type: 'text-delta',
+                            id: 'text-0',
+                            delta: xmlEvent.delta,
+                          });
+                        } else if (xmlEvent.type === 'text-end') {
+                          controller.enqueue({
+                            type: 'text-end',
+                            id: 'text-0',
+                          });
+                          hasEmittedTextEnd = true;
+                        } else if (xmlEvent.type === 'tool-input-delta') {
+                          controller.enqueue({
+                            type: 'tool-input-delta',
+                            id: xmlEvent.toolCallId,
+                            delta: xmlEvent.delta,
+                          });
+                        } else if (xmlEvent.type === 'tool-input-end') {
+                          controller.enqueue({
+                            type: 'tool-input-end',
+                            id: xmlEvent.toolCallId,
+                          });
+                        } else if (xmlEvent.type === 'tool-call-complete') {
+                          controller.enqueue({
+                            type: 'tool-call',
+                            toolCallId: xmlEvent.toolCallId,
+                            toolName: xmlEvent.toolName,
+                            input: JSON.stringify(xmlEvent.arguments),
+                          });
+                          finishReason = 'tool-calls';
+                        }
+                      }
+                    }
+
+                    // Emit text-end if flush didn't emit it
+                    if (!hasEmittedTextEnd) {
+                      controller.enqueue({
+                        type: 'text-end',
+                        id: 'text-0',
+                      });
+                      hasEmittedTextEnd = true;
+                    }
+                  }
+                }
+              } else if (event.type === 'assistant') {
+                // Extract content from assistant message
+                // Note: With includePartialMessages: true, content has already been streamed
+                // via stream_event. We only need to handle final metadata here.
+                const content = event.message.content;
+                for (const block of content) {
+                  if (block.type === 'thinking') {
+                    // Thinking blocks are handled via stream_event
+                  } else if (block.type === 'text') {
+                    // Text has already been streamed via stream_event with includePartialMessages: true
+                    // Skip re-emitting to avoid duplication
+                  }
+                }
+
+                // Check stop reason
+                if (event.message.stop_reason === 'end_turn') {
+                  // Keep tool-calls finish reason if we detected tool calls
+                  if (finishReason !== 'tool-calls') {
+                    finishReason = 'stop';
+                  }
+                } else if (event.message.stop_reason === 'max_tokens') {
+                  finishReason = 'length';
+                }
+              } else if (event.type === 'result') {
+                // Check for errors
+                try {
+                  handleResultError(event);
+                } catch (error) {
+                  controller.error(error);
+                  return;
+                }
+
+                // Extract usage
+                const usage = extractUsage(event);
+                inputTokens = usage.inputTokens;
+                outputTokens = usage.outputTokens;
+              }
+            }
+
+            // Emit text-end if we started text but haven't emitted text-end yet
+            if (hasStartedText && !hasEmittedTextEnd) {
+              controller.enqueue({
+                type: 'text-end',
+                id: 'text-0',
+              });
+            }
+
+            // Emit finish
+            controller.enqueue({
+              type: 'finish',
+              finishReason,
+              usage: {
+                inputTokens: inputTokens,
+                outputTokens: outputTokens,
+                totalTokens: inputTokens + outputTokens,
+              },
+              providerMetadata: {},
+            });
+
+            controller.close();
+          } catch (error) {
+            controller.error(error);
+          }
+        },
+      });
+
+      return {
+        stream,
+        response: { headers: {} },
+      };
+    } catch (error) {
+      throw new Error(
+        `Claude Code streaming failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+}

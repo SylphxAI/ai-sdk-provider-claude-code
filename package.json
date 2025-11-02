@@ -1,0 +1,58 @@
+{
+  "name": "@sylpx/ai-sdk-provider-claude-code",
+  "version": "1.0.0",
+  "description": "Claude Code provider for Vercel AI SDK with universal tool support",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "test": "echo \"Tests coming soon\" && exit 0"
+  },
+  "keywords": [
+    "ai",
+    "ai-sdk",
+    "vercel",
+    "claude",
+    "claude-code",
+    "anthropic",
+    "llm",
+    "language-model",
+    "provider",
+    "tools"
+  ],
+  "author": "Sylph X Ltd",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sylphxltd/ai-sdk-provider-claude-code.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sylphxltd/ai-sdk-provider-claude-code/issues"
+  },
+  "homepage": "https://github.com/sylphxltd/ai-sdk-provider-claude-code#readme",
+  "peerDependencies": {
+    "@ai-sdk/provider": "^2.0.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.1.0"
+  },
+  "devDependencies": {
+    "@ai-sdk/provider": "^2.0.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.1.5",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
