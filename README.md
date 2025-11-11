@@ -299,12 +299,12 @@ MIT © 2025 Sylph X Ltd
 
 ## 🆘 Support
 
-- 📖 [Documentation](https://github.com/sylphxltd/ai-sdk-provider-claude-code#readme)
-- 🐛 [Issue Tracker](https://github.com/sylphxltd/ai-sdk-provider-claude-code/issues)
-- 💬 [Discussions](https://github.com/sylphxltd/ai-sdk-provider-claude-code/discussions)
+- 📖 [Documentation](https://github.com/SylphxAI/ai-sdk-provider-claude-code#readme)
+- 🐛 [Issue Tracker](https://github.com/SylphxAI/ai-sdk-provider-claude-code/issues)
+- 💬 [Discussions](https://github.com/SylphxAI/ai-sdk-provider-claude-code/discussions)
 
 ---
 
-**Made with ❤️ by [Sylph X Ltd](https://github.com/sylphxltd)**
+**Made with ❤️ by [Sylph X Ltd](https://github.com/SylphxAI)**
 
 If you find this provider helpful, please consider giving it a ⭐ on GitHub!
