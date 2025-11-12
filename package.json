@@ -17,9 +17,10 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "bunup",
     "prepublishOnly": "npm run build",
-    "test": "echo \"Tests coming soon\" && exit 0"
+    "test": "echo \"Tests coming soon\" && exit 0",
+    "test:cov": "vitest run --coverage"
   },
   "keywords": [
     "ai",
@@ -54,5 +55,6 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "packageManager": "bun@1.3.1"
 }
